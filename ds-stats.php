@@ -21,12 +21,19 @@ function GetStats($name = "", $url = "") {
     
     $return['farmers']      = 0;
     $return['total_height'] = 0;
-    $return['height'] = array();
+    $return['height']       = array();
+    $return['bad_farmers']  = 0;
+    $return['bad_height']   = array();
     
     foreach ($parsed['farmers'] as $farmer) {
-        $return['height'][$farmer['btc_addr']] = $farmer['height'];
-        $return['total_height'] += $farmer['height'];
-        $return['farmers']++;
+        if ($farmer['height'] < (8192 * 25)) {
+            $return['height'][$farmer['btc_addr']] = $farmer['height'];
+            $return['total_height'] += $farmer['height'];
+            $return['farmers']++;
+        } else {
+            $return['bad_farmers']++;
+            $return['bad_height'][$farmer['btc_addr']] = $farmer['height'];
+        }
     }
     
     return $return;
@@ -45,6 +52,12 @@ foreach ($urls as $version => $url) {
     $farmers     = $data[$version]['farmers'];
    
     echo "On {$version}: {$farmers} farmers sharing {$this_served} TiB data\n";
+    if ($data[$version]['bad_farmers'] > 0) {
+        echo "Bad Farmers:\n";
+        foreach ($data[$version]['bad_height'] as $addr => $height) {
+            echo "- {$addr} sharing " . number_format(($height / 8192), 3) . " TiB (" . trim($version) . ")\n";
+        }
+    }
 }
 
 $final_height = number_format(($final_height / 8192), 3);
