@@ -51,13 +51,16 @@ foreach ($urls as $version => $url) {
     $final_height += $data[$version]['total_height'];
     $this_served = number_format(($data[$version]['total_height'] / 8192), 3);
     $farmers     = $data[$version]['farmers'];
-    $average     = number_format(((array_sum($data[$version]['height']) / count($data[$version]['height'])) / 8192), 3);
+    $average     = number_format(((array_sum($data[$version]['height']) /
+                   count($data[$version]['height'])) / 8192), 3);
    
-    echo "On {$version}: {$farmers} farmers sharing {$this_served} TiB data (average {$average} TiB)\n";
+    echo "On {$version}: {$farmers} farmers sharing {$this_served} TiB data " .
+         "(average {$average} TiB)\n";
     if ($data[$version]['bad_farmers'] > 0) {
         echo "Bad Farmers:\n";
         foreach ($data[$version]['bad_height'] as $addr => $height) {
-            echo "- {$addr} sharing " . number_format(($height / 8192), 3) . " TiB (" . trim($version) . ")\n";
+            echo "- {$addr} sharing " . number_format(($height / 8192), 3) .
+                 " TiB (" . trim($version) . ")\n";
         }
     }
 }
