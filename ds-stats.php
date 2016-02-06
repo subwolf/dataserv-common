@@ -9,7 +9,7 @@
 
 /* Array of urls to fetch */
 $urls = array(
-    'v2.1.4' => "http://status.driveshare.org/api/online/json"
+    'v2.1.x' => "http://status.driveshare.org/api/online/json"
 );
 
 $jsonFile = 'ds-stats.json';
@@ -49,15 +49,16 @@ function GetStats($name = "", $url = "") {
         return array('error' => "Failed to parse JSON.");
 
     foreach (array('wl', 'non-wl') as $val) {
-        $return[$val]['farmers']        = 0;
-        $return[$val]['total_height']   = 0;
-        $return[$val]['height']         = array();
-        $return[$val]['duplicates']     = 0;
-        $return[$val]['under_10k']      = 0;
-        $return[$val]['over_10k']       = 0;
-        $return[$val]['sjcx_over_10k']  = 0;
-        $return[$val]['sjcx_under_10k'] = 0;
-        $return[$val]['total_sjcx']     = 0;
+        $return[$val]['farmers']          = 0;
+        $return[$val]['total_height']     = 0;
+        $return[$val]['height'][$val]     = array();
+        $return[$val]['duplicates']       = array();
+        $return[$val]['duplicate_count']  = 0;
+        $return[$val]['under_10k']        = 0;
+        $return[$val]['over_10k']         = 0;
+        $return[$val]['sjcx_over_10k']    = 0;
+        $return[$val]['sjcx_under_10k']   = 0;
+        $return[$val]['total_sjcx']       = 0;
     }
     
     // Are they whitelisted?
@@ -67,11 +68,24 @@ function GetStats($name = "", $url = "") {
         else
             $t = 'non-wl';
             
-        $return[$t]['height'][$farmer['btc_addr']] = $farmer['height'];
         $return[$t]['total_height'] += $farmer['height'];
         $return[$t]['farmers']++;
-        if (in_array($farmer['payout_addr'], array_keys($return[$t]['height'])))
-            $return[$t]['duplicates']++;
+        if (in_array($farmer['payout_addr'], array_keys($return[$t]['height'])) &&
+            !in_array($farmer['btc_addr'], array_keys($return[$t]['height'])))
+        {
+            if (!isset($return[$t]['duplicates'][$farmer['payout_addr']]))
+                $return[$t]['duplicates'][$farmer['payout_addr']] = 2;
+            else
+                $return[$t]['duplicates'][$farmer['payout_addr']]+= 2;
+            
+            if (!isset($return[$t]['duplicate_height'][$farmer['payout_addr']]))
+                $return[$t]['duplicate_height'][$farmer['payout_addr']] = $return[$t]['height'][$farmer['payout_addr']];
+            $return[$t]['duplicate_height'][$farmer['payout_addr']] += $farmer['height'];
+
+            $return[$t]['duplicate_count']+= 2;
+        }
+
+        $return[$t]['height'][$farmer['payout_addr']] = $farmer['height'];
             
         // Do we have balance information?
         if (!isset($sData['balance'][$farmer['btc_addr']]))
@@ -82,74 +96,109 @@ function GetStats($name = "", $url = "") {
             $gb = False;
             
         if ($gb == True) {
+            // echo "Getting balance for {$farmer['payout_addr']} ...\n";
+            echo ".";
+            flush();
             $balance = (array) json_decode(file_get_contents($sData['balUrl'] . $farmer['payout_addr']));
-            var_dump($balance);
             if ($balance['status'] == "success") {
                 $bal = $balance['data'][0]->balance;
-                if ($bal >= 10000) {
-                    $return[$t]['over_10k']++;
-                    $return[$t]['sjcx_over_10k'] += $bal;
-                } else {
-                    $return[$t]['under_10k']++;
-                    $return[$t]['sjcx_under_10k'] += $bal;
-                }
-                
                 $return[$t]['total_sjcx'] += $bal;
                 $sData['balance'][$farmer['btc_addr']]['balance'] = $bal;
             } else {
                 $sData['balance'][$farmer['btc_addr']]['balance'] = 0;            
             }
-
+            
             $sData['balance'][$farmer['btc_addr']]['last'] = time();
             sleep(0.5);
         } else {
             $bal = $sData['balance'][$farmer['btc_addr']]['balance'];
-            if ($bal >= 10000) {
-                $return[$t]['over_10k']++;
-                $return[$t]['sjcx_over_10k'] += $bal;
-            } else {
-                $return[$t]['under_10k']++;
-                $return[$t]['sjcx_under_10k'] += $bal;
-            }
             $return[$t]['total_sjcx'] += $bal;
         }
-        
-        // break; // Out early
+      
+        if ($bal >= 10000) {
+            $return[$t]['over_10k']++;
+            $return[$t]['sjcx_over_10k'] += $bal;
+        } else {
+            $return[$t]['under_10k']++;
+            $return[$t]['sjcx_under_10k'] += $bal;
+        }
     }
     
     return $return;
 }
 
-$data         = array();
-$final_height = 0;
-$final_sjcx   = 0;
+$data           = array();
+$final_height   = 0;
+$final_sjcx     = 0;
+$final_peers    = 0;
+$limited_height = 0;
+
+echo "Updating balances...";
+$wl = array('wl' => "Crowdsale", 'non-wl' => "Other Testers");
 
 foreach ($urls as $version => $url) {
-    $wl = array('wl' => "Whitelisted", 'non-wl' => "Non-whitelisted");
     $data[$version] = GetStats($version, $url);
     if (isset($data[$version]["error"])) 
         die("Error parsing {$url}: {$data[$version]['error']}\n\n");
-    
+}
+
+echo " done.\n";
+
+date_default_timezone_set('UTC');
+
+echo "\nData correct as of " . date(DATE_RFC822) . "\n";
+
+$duplicate_list = array();
+
+foreach ($urls as $version => $url) {
     foreach ($wl as $key => $val) {
-        $final_height  += $data[$version][$key]['total_height'];
-        $final_sjcx    += $data[$version][$key]['total_sjcx'];
-        $this_served    = number_format(($data[$version][$key]['total_height'] / 8192), 3);
-        $farmers        = $data[$version][$key]['farmers'];
-        $average        = number_format(((array_sum($data[$version][$key]['height']) /
-                          count($data[$version][$key]['height'])) / 8192), 3);
-        $duplicates     = $data[$version][$key]['duplicates'];
-        $total_sjcx     = number_format($data[$version][$key]['total_sjcx'], 0);
+        $thisOne        = $data[$version][$key];
+        $final_height  += $thisOne['total_height'];
+        $final_sjcx    += $thisOne['total_sjcx'];
+        $this_served    = number_format(($thisOne['total_height'] / 8192), 3);
+        $farmers        = $thisOne['farmers'];
+        $average        = number_format(((array_sum($thisOne['height']) /
+                          count($thisOne['height'])) / 8192), 3);
+        $duplicates     = $thisOne['duplicate_count'];
+        $total_sjcx     = number_format($thisOne['total_sjcx'], 0);
+        $final_peers   += $thisOne['farmers'];
        
         echo "On {$version} ({$val}): {$farmers} farmers sharing {$this_served} TiB data, " .
              "averaging {$average} TiB, total {$total_sjcx} SJCX ({$duplicates} duplicates)\n";
+             
+        if ($duplicates > 0) {
+            $duplicate_list[$key][$url] = $thisOne['duplicates'];
+            $duplicate_height[$key][$url] = $data[$version][$key]['duplicate_height'];
+            foreach ($duplicate_height[$key][$url] as $addr => $height) {
+                if ($height > (8192 * 25))
+                    $limited_height += (8192 * 25);
+                else
+                    $limited_height += $height;
+            }
+        }
     }
 }
 
-$final_height = number_format(($final_height / 8192), 3);
+$final_height = number_format(($final_height / 8192 / 1024), 5);
 $final_sjcx   = number_format($final_sjcx, 0);
+$final_peers  = number_format($final_peers, 0);
 
+echo "\nTotal shared: {$final_height} PiB by {$final_peers} peers holding {$final_sjcx} SJCX\n";
 
-echo "Total shared: {$final_height} TiB with {$final_sjcx} SJCX\n\n";
+if (count($duplicate_list) > 0)
+{
+    echo "Total shared when addresses limited to 25 TiB: " . number_format(($limited_height / 8192 / 1024), 3) . " PiB\n\n";
+    
+    echo "Duplicate addresses: \n";
+    foreach ($urls as $version => $url) {
+        foreach ($wl as $key => $val) {
+            foreach ($duplicate_list[$key][$url] as $addr => $count) {
+                $dupe_shared = number_format(($duplicate_height[$key][$url][$addr] / 8192), 3);
+                echo "- {$addr} with {$count} entries ({$val}) sharing {$dupe_shared} TiB\n";
+            }
+        }
+    }
+}
 
 $sData = json_encode($sData);
 $sFile = fopen($jsonFile, "w");
